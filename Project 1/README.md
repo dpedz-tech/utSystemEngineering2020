@@ -6,7 +6,7 @@ File redirection
 with creation of files if they don't exist for output redirection
 fail command if input redirection (a file) does not exist
 < will replace stdin with the file that is the next token
-> will replace stdout with the file that is the next token
+">" will replace stdout with the file that is the next token
 2> will replace stderr with the file that is the next token
 A command can have all three (or a subset) of the redirection symbols 
 

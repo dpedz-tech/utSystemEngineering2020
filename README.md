@@ -1,2 +1,2 @@
-# Developed for University of Texas at Austin, Class System Engineering 2020
-Projects for System Engineering at University of Texas at Austin
+# Developed for System Engineering Class at University of Texas at Austin
+Project 1: Simple Shell
