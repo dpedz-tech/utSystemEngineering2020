@@ -1,21 +1,27 @@
 default: all
 
-all: daleTerm
+# all: simpleTerm newSimpleTerm basicTerm gnuTerm
+all:yash
 
 clean:
-	rm -f daleTerm
-	rm -f execTerm
-	rm -f basicTerm
-	rm -f gnuTerm
+	# rm -f simpleTerm
+	# rm -f newSimpleTerm
+	# rm -f basicTerm
+	# rm -f gnuTerm
+	rm -f yash
+	# rm -f *.txt
 
-daleTerm: simpleTerm.c
-	gcc -o daleTerm simpleTerm.c -lreadline 
+# simpleTerm: simpleTerm.c
+# 	gcc -o simpleTerm simpleTerm.c -lreadline 
 
-exec2: exec2.c
-	gcc -o execTerm exec2.c -lreadline 
+# newSimpleTerm: newSimpleTerm.c
+# 	gcc -o newSimpleTerm newSimpleTerm.c -lreadline 
 	
-basicTerm: terminal.c
-	gcc -o basicTerm terminal.c -lreadline 
+# basicTerm: terminal.c
+# 	gcc -o basicTerm terminal.c -lreadline 
 
-gnuTerm: gnuTerm.c
-	gcc -o gnuTerm gnuTerm.c -lreadline 
+# gnuTerm: gnuTerm.c
+# 	gcc -o gnuTerm gnuTerm.c -lreadline 
+
+yash: newSimpleTerm.c
+	gcc -o yash newSimpleTerm.c -lreadline 
