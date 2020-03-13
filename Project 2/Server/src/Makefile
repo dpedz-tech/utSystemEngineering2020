@@ -6,7 +6,7 @@ _OBJ = yashd.o yash_thread.o yash.o
 OBJ = $(patsubst %, $(ODIR)/%, $(_OBJ))
 
 IDIR =../include
-CFLAGS=-I$(IDIR) -std=gnu99 ld--version
+CFLAGS=-I$(IDIR)
 #DEPS = $(patsubst %, $(IDIR)/%)
 
 $(ODIR)/%.o: %.c $(DEPS)
