@@ -93,7 +93,7 @@ void process_loop() {
         if (rc == 0){
             break;
         }
-        if(prefix("CMD ",line) ==0){
+        if(starts_with("CMD ",line) ==0){
             send(sd, line, rc, 0);
         }else{
             
@@ -128,6 +128,11 @@ void init() {
     for (i = 0; i < NR_JOBS; i++) {
         shell->jobs[i] = NULL;
     }
+}
+
+int starts_with(const char *pre, const char *str)
+{
+    return strncmp(pre, str, strlen(pre));
 }
 
 int main(int argc, char **argv) {
@@ -249,7 +254,3 @@ void cleanup(char *buf)
 //     kill(getppid(), 9);
 //     exit (0);
 // }
-int prefix(const char *pre, const char *str)
-{
-    return strncmp(pre, str, strlen(pre));
-}

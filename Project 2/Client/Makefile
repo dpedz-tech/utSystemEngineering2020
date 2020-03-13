@@ -12,4 +12,4 @@ clean:
 	# rm -f *.txt
 
 yash: client.c
-	gcc -o yash client.c -lreadline 
+	gcc -o yash client.c
