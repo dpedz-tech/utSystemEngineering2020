@@ -11,17 +11,5 @@ clean:
 	rm -f yash
 	# rm -f *.txt
 
-# simpleTerm: simpleTerm.c
-# 	gcc -o simpleTerm simpleTerm.c -lreadline 
-
-# newSimpleTerm: newSimpleTerm.c
-# 	gcc -o newSimpleTerm newSimpleTerm.c -lreadline 
-	
-# basicTerm: terminal.c
-# 	gcc -o basicTerm terminal.c -lreadline 
-
-# gnuTerm: gnuTerm.c
-# 	gcc -o gnuTerm gnuTerm.c -lreadline 
-
-yash: newSimpleTerm.c
-	gcc -o yash newSimpleTerm.c -lreadline 
+yash: client.c
+	gcc -o yash client.c -lreadline 
