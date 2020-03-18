@@ -2,8 +2,10 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <stdbool.h>
+#include <netinet/in.h>
+#include <netinet/in.h>
 
-#define MAX_BG_PROCESSES 100
+#define MAX_JOBS 100
 
 #define MAX_NUM_ARGS 30
 #define MAX_TOKEN_SIZE 30
@@ -49,9 +51,9 @@ typedef struct
 typedef struct
 {
     char inputString[2001];
+    char activeString[2001];
     pid_t pgId;
     EProcStatus status;
-    bool isJobs;
 }sJobType;
 
 typedef struct
@@ -63,14 +65,16 @@ typedef struct
 }sCommandDetail;
 
 typedef struct {
-	int sock_fd;
+	struct sockaddr_in client;
+	int sock_fd;	
 	int cmd_pipe[2];
 	int ctl_pipe[2];
 	sem_t job_sem;
 	pid_t childPid;//Only use this in the main thread
 	
 	sCommandDetail fgInfo;
-	sCommandDetail bgInfo[MAX_BG_PROCESSES];
+	sCommandDetail jobs[MAX_JOBS];
+	int jobsNextIndex;
 }sYashThreadType;
 
 

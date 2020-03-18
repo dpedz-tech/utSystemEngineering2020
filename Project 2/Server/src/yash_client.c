@@ -9,7 +9,7 @@
 #include <unistd.h> /* close() */
 #include <stdlib.h> /* exit() */
 #include <signal.h>
-#define BUFSIZE 1024
+#define BUFSIZE 512
 #define CTLD "CTL d\n"
 #define CTLC "CTL c\n"
 #define CTLZ "CTL z\n"

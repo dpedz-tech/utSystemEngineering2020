@@ -14,103 +14,97 @@
 #include <unistd.h>
 #include <errno.h>
 #include <semaphore.h>
+#include <pty.h>
+#include <arpa/inet.h>
 #include "yash.h"
 #include "yashd.h"
 #include "yash_thread.h"
 
-//static sJobType jobsTable[MAX_JOBS_SUPPORTED] = {0};
-//static int jobsNextIndex = 0;
+#define REDIR_FILE_MASK (O_TRUNC | O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)
 
-/*
- * @Function:   find_job
- * @brief:      Find the job with the given PG ID
- *              Returns NULL if not found
- */
-/*static sJobType * find_job(pid_t pgId)
-{
-    for(int i = 0; i < MAX_JOBS_SUPPORTED; i++)
-    {
-        if(jobsTable[i].pgId == pgId)
-        {
-            return (&(jobsTable[i]));
-        }
-    }
-    return NULL;
-}*/
-/*
- * @Function:   find_last_stopped_job
- * @brief:      Returns the information for the last stopped job
- *              Used by BG command
- *              Returns NULL if not found
- */
-/*static sJobType *find_last_stopped_job(void)
-{
-    for(int i = MAX_NON_FG_JOBS_SUPPORTED - 1; i >= 0; i--)
-    {
-        if(jobsTable[i].pgId && PROC_STOP == jobsTable[i].status)
-        {
-            return (&(jobsTable[i]));
-        }
-    }
-    return NULL;
-}*/
-/*
- * @Function:   update_job
- * @brief:      Updates the running status of a job
- */
-/*static void update_job(sJobType *jobEntry)
-{
-    sJobType *found_job = find_job(jobEntry->pgId);
-    if(found_job)
-    {
-        found_job->status = jobEntry->status;
-    }
-}*/
-/*
- * @Function:   push_job
- * @brief:      Pushes a job into the job data structure
- *              If a Foreground job, put at a certain index
- *              If a background job, insert into last available index
- */
-/*static int push_job(sJobType *jobEntry, bool isFg)
-{
-    int pushedIndex = -1;
-    if(isFg)
-    {
-        pushedIndex = FG_JOB_INDEX;
-        memcpy(&(jobsTable[FG_JOB_INDEX]), jobEntry, sizeof(sJobType));
-    }
-    else
-    {
-        pushedIndex = jobsNextIndex;
-        memcpy(&(jobsTable[jobsNextIndex]), jobEntry, sizeof(sJobType));
-        jobsNextIndex++;
-    }
-    return pushedIndex;
-}*/
-/*
- * @Function:   remove_job
- * @brief:      Removes a job specified at index
- *              Foreground job exempt from the updating the next index counter
- */
-/*static void remove_job(int jobIndex)
-{
-    if(FG_JOB_INDEX == jobIndex)
-    {
-        memset(&(jobsTable[FG_JOB_INDEX]), 0, sizeof(sJobType));
-    }
-    else
-    {
-        memset(&(jobsTable[jobIndex]), 0, sizeof(sJobType));
-        if((jobsNextIndex - 1) == jobIndex)
-        {
-            while(jobsNextIndex && !(jobsTable[jobsNextIndex - 1].pgId))
-            {
-               jobsNextIndex--;
-            } 
-        }
-    }
-}*/
+void debug_logger(const char* format, ...);
+
+void get_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	memcpy(cmdInfo, &(yash_thread_info->fgInfo), sizeof(sCommandDetail));
+	sem_post(job_sem);
+}
+void push_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	memcpy(&(yash_thread_info->fgInfo), cmdInfo, sizeof(sCommandDetail));
+	sem_post(job_sem);
+}
+void pop_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	memset(&(yash_thread_info->fgInfo), 0, sizeof(sCommandDetail));
+	sem_post(job_sem);
+}
+void push_job_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	memcpy(&(yash_thread_info->jobs[yash_thread_info->jobsNextIndex]), cmdInfo, sizeof(sCommandDetail));
+    yash_thread_info->jobsNextIndex++;
+	sem_post(job_sem);
+}
+void update_job_cmd(sYashThreadType *yash_thread_info, pid_t pgId, EProcStatus status) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	for(int i = 0; i < MAX_JOBS; i++) {
+		if(pgId == yash_thread_info->jobs[i].jobInfo.pgId) {
+			yash_thread_info->jobs[i].jobInfo.status = status;
+			break;
+		}
+	}
+	sem_post(job_sem);
+}
+void remove_job_cmd(sYashThreadType *yash_thread_info, pid_t pgId) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	for(int i = 0; i < MAX_JOBS; i++) {
+		if(pgId == yash_thread_info->jobs[i].jobInfo.pgId) {
+			memset(&(yash_thread_info->jobs[i]), 0, sizeof(sCommandDetail));
+			if((yash_thread_info->jobsNextIndex - 1) == i) {
+            	while((yash_thread_info->jobsNextIndex)
+            	&& 	!(yash_thread_info->jobs[yash_thread_info->jobsNextIndex - 1].jobInfo.pgId)) {
+               		yash_thread_info->jobsNextIndex--;
+            	} 
+        	}
+        	break;
+		}
+	}
+	sem_post(job_sem);
+}
+void get_last_job_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	if(0 < yash_thread_info->jobsNextIndex) {
+		memcpy(cmdInfo, &(yash_thread_info->jobs[yash_thread_info->jobsNextIndex - 1]), sizeof(sCommandDetail));
+	}
+	sem_post(job_sem);
+}
+void get_last_stop_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	for(int i = yash_thread_info->jobsNextIndex - 1; i >= 0; i--) {
+		if((yash_thread_info->jobs[i].jobInfo.pgId)
+		&&(PROC_STOP == yash_thread_info->jobs[i].jobInfo.status)) {
+			memcpy(cmdInfo, &(yash_thread_info->jobs[i]), sizeof(sCommandDetail));
+			break;
+		}
+	}
+	sem_post(job_sem);
+}
 
 void print_cmd_info(sCommandDetail *cmdInfo) {
 	debug_logger("[%s]: Here",__func__);
@@ -151,6 +145,12 @@ void parse_line_to_cmd(sCommandDetail *cmdInfo, char *line, size_t charNum) {
     lineCpy[charNum - 1] = 0;
     
     memcpy(cmdInfo->jobInfo.inputString, lineCpy, sizeof(char) * charNum);
+    
+    if(lineCpy[charNum - 2] == '&') {
+      	cmdInfo->isBackground = true;
+      	lineCpy[charNum - 2] = 0;
+    }
+    memcpy(cmdInfo->jobInfo.activeString, lineCpy, sizeof(char) * charNum);
 
 	debug_logger("%s",lineCpy);
     tokenPipe = strtok_r(lineCpy,"|", &pipeStr);
@@ -171,8 +171,6 @@ void parse_line_to_cmd(sCommandDetail *cmdInfo, char *line, size_t charNum) {
             } else if(0 == strcmp(tokenCmd, "<")) {
                 strcpy(cmdInfo->cmdMatrix[cmdIndex].stdInRedirectFileStr, strtok_r(NULL, " ",&cmdStr));
                 cmdInfo->cmdMatrix[cmdIndex].isStdInRedirect = true;
-            } else if(0 == strcmp(tokenCmd, "&")) {
-                cmdInfo->isBackground = true;
             } else {	
                 strncpy(cmdInfo->cmdMatrix[cmdIndex].argv[(*argvSize) - 1], tokenCmd, MAX_TOKEN_SIZE);
                 (*argvSize)++;
@@ -201,13 +199,13 @@ static void conf_redirection(sCommandDetail *cmdInfo, int cmdIndex) {
         }
     }
     if(cmdInfo->cmdMatrix[cmdIndex].isStdOutRedirect) {
-        int std_out_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdOutRedirectFileStr, O_TRUNC | O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+        int std_out_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdOutRedirectFileStr, REDIR_FILE_MASK);
         if((-1 != std_out_redir_fd) && (-1 != dup2(std_out_redir_fd, fileno(stdout)))) {
             fflush(stdout); close(std_out_redir_fd);
         }
     }
     if(cmdInfo->cmdMatrix[cmdIndex].isStdErrRedirect) {
-        int std_err_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdErrRedirectFileStr, O_TRUNC | O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+        int std_err_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdErrRedirectFileStr, REDIR_FILE_MASK);
         if((-1 != std_err_redir_fd) && (-1 != dup2(std_err_redir_fd, fileno(stderr)))) {
             fflush(stderr); close(std_err_redir_fd);
         }
@@ -221,42 +219,58 @@ static void conf_redirection(sCommandDetail *cmdInfo, int cmdIndex) {
  *              after a newline is detected in the prompt
  *              Triggers a command to remove those jobs from memory
  */
-/*static void print_done_jobs(void)
-{
-    for(int i = 0; i < MAX_NON_FG_JOBS_SUPPORTED; i++)
-    {
-        if(jobsTable[i].pgId && PROC_DONE == jobsTable[i].status)
-        {
-            printf("[%d]%s %-20s%-20s\n",
-                i,
-                "-",
-                PROC_STRING[jobsTable[i].status],
-                jobsTable[i].inputString);
-            remove_job(i);
+static void print_done_jobs(sYashThreadType *yash_thread_info) {
+    sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+    for(int i = 0; i < MAX_JOBS; i++) {
+        if(PROC_DONE == yash_thread_info->jobs[i].jobInfo.status) {
+        	EProcStatus status = yash_thread_info->jobs[i].jobInfo.status;
+            dprintf(yash_thread_info->sock_fd,
+            		"[%d]%s%-10s%30s &\n",
+            		i,"-", PROC_STRING[status],
+            		yash_thread_info->jobs[i].jobInfo.activeString);
+            sem_post(job_sem);
+            remove_job_cmd(yash_thread_info, yash_thread_info->jobs[i].jobInfo.pgId);
+            sem_wait(job_sem);
         }
     }
-}*/
+    sem_post(job_sem);
+}
 /*
  * @Function:   jobs
  * @brief:      Implementation of bash-like jobs command,
  *              pipe-able and handles redirection since it's forked
  *              from yash
  */
-/*static void jobs(void)
-{
-    for(int i = 0; i < MAX_NON_FG_JOBS_SUPPORTED; i++)
-    {
-        if(jobsTable[i].pgId)
-        {
-            printf("[%d]%s %-20s%-20s\n",
-                i,
-                (i == jobsNextIndex - 1)? "+":"-",
-                PROC_STRING[jobsTable[i].status],
-                jobsTable[i].inputString);
+static void jobs(sYashThreadType *yash_thread_info) {
+	sem_t *job_sem = &(yash_thread_info->job_sem);
+	sem_wait(job_sem);
+	debug_logger("[%s]: Here",__func__);
+	for(int i = 0; i < MAX_JOBS; i++) {
+        if(yash_thread_info->jobs[i].jobInfo.pgId) {
+            EProcStatus status = yash_thread_info->jobs[i].jobInfo.status;
+            char plusMinus, bgFg;
+            if(i == (yash_thread_info->jobsNextIndex - 1)) {
+            	plusMinus = '+';
+            } else {
+            	plusMinus = '-';
+            }
+            if(PROC_RUN == (yash_thread_info->jobs[i].jobInfo.status)) {
+            	bgFg = '&';
+            } else {
+            	bgFg = ' ';
+            }
+            dprintf(yash_thread_info->sock_fd,
+            		"[%d]%c%-10s%30s %c\n",
+            		i,plusMinus,PROC_STRING[status],
+            		yash_thread_info->jobs[i].jobInfo.activeString,
+            		bgFg);
         }
     }
-    exit(0);
-}*/
+	sem_post(job_sem); 
+}
+
 /*
  * @Function:   run_cmd_regular
  * @brief:      Execution of single command, used by pipe API
@@ -266,6 +280,8 @@ static void conf_redirection(sCommandDetail *cmdInfo, int cmdIndex) {
  *              Most commands will be searched on the path
  */
 static void run_cmd_regular(sCommandDetail *cmdInfo, int cmdIndex) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
     conf_redirection(cmdInfo, cmdIndex);
     for(int i = 0; i < cmdInfo->cmdMatrix[cmdIndex].argvSize - 1; i++) {
     	cmdInfo->cmdMatrix[cmdIndex].argvExec[i] = cmdInfo->cmdMatrix[cmdIndex].argv[i];
@@ -293,26 +309,74 @@ static void run_cmd_pipe(sCommandDetail *cmdInfo) {
         run_cmd_regular(cmdInfo, 1);
     }
 }
-void get_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
-	sem_t *job_sem = &(yash_thread_info->job_sem);
-	sem_wait(job_sem);
-	debug_logger("[%s]: Here",__func__);
-	memcpy(cmdInfo, &(yash_thread_info->fgInfo), sizeof(sCommandDetail));
-	sem_post(job_sem);
+
+static void fg(sYashThreadType *yash_thread_info) {
+	sCommandDetail cmdInfo = {0};
+	get_last_job_cmd(yash_thread_info, &cmdInfo);
+	if(cmdInfo.jobInfo.pgId) {
+		int status = 0;
+		remove_job_cmd(yash_thread_info, cmdInfo.jobInfo.pgId);
+		cmdInfo.jobInfo.status = PROC_RUN;
+		push_fg_cmd(yash_thread_info, &cmdInfo);
+		kill(cmdInfo.jobInfo.pgId, SIGCONT);
+		
+		printf("%s",cmdInfo.jobInfo.activeString);
+		fflush(stdout);
+		
+		waitpid(cmdInfo.jobInfo.pgId, &status, WUNTRACED);
+		pop_fg_cmd(yash_thread_info, &cmdInfo);
+        if(WIFSTOPPED(status)) {
+        	cmdInfo.jobInfo.status = PROC_STOP;
+        	push_job_cmd(yash_thread_info, &cmdInfo);
+        } else {
+        	//command stopped
+        }
+	}
 }
-static void push_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
-	sem_t *job_sem = &(yash_thread_info->job_sem);
-	sem_wait(job_sem);
-	debug_logger("[%s]: Here",__func__);
-	memcpy(&(yash_thread_info->fgInfo), cmdInfo, sizeof(sCommandDetail));
-	sem_post(job_sem);
+static void bg(sYashThreadType *yash_thread_info) {
+	sCommandDetail cmdInfo = {0};
+	get_last_stop_cmd(yash_thread_info, &cmdInfo);
+	if(cmdInfo.jobInfo.pgId) {
+		update_job_cmd(yash_thread_info, cmdInfo.jobInfo.pgId, PROC_RUN);
+		kill(cmdInfo.jobInfo.pgId, SIGCONT);
+		printf("%s &",cmdInfo.jobInfo.activeString);
+		fflush(stdout);
+	}
 }
-static void pop_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
-	sem_t *job_sem = &(yash_thread_info->job_sem);
-	sem_wait(job_sem);
-	debug_logger("[%s]: Here",__func__);
-	memset(&(yash_thread_info->fgInfo), 0, sizeof(sCommandDetail));
-	sem_post(job_sem);
+static void fork_exec(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	int terminalfd; // We are going to read & write to our child through it
+
+   	//pid_t pid = forkpty(&terminalfd, NULL, NULL, NULL); 
+	pid_t pid = fork();
+    if(0 == pid) {
+      	setpgrp();
+        signal(SIGTSTP, SIG_DFL);
+        signal(SIGINT, SIG_DFL);
+        if((1 < cmdInfo->cmdMatrix[0].argvSize)
+        && (1 < cmdInfo->cmdMatrix[1].argvSize)) {
+          	run_cmd_pipe(cmdInfo);
+        } else if (1 < cmdInfo->cmdMatrix[0].argvSize) {
+            run_cmd_regular(cmdInfo, 0);
+        }
+    } else {
+    	setpgid(pid, pid);
+        cmdInfo->jobInfo.pgId = pid;
+        cmdInfo->jobInfo.status = PROC_RUN;
+        if(!(cmdInfo->isBackground)) {
+          	int status = 0;
+            push_fg_cmd(yash_thread_info, cmdInfo);
+            waitpid(pid, &status, WUNTRACED);
+            pop_fg_cmd(yash_thread_info, cmdInfo);
+            if(WIFSTOPPED(status)) {
+            	cmdInfo->jobInfo.status = PROC_STOP;
+            	push_job_cmd(yash_thread_info, cmdInfo);
+            } else {
+            	//command stopped
+            }
+        } else {
+        	push_job_cmd(yash_thread_info, cmdInfo);
+        }
+    }
 }
 /*
  * @Function:   run_cmd
@@ -323,149 +387,18 @@ static void pop_fg_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInf
  *              jobs is supported by redirection and piping, fg and bg are not
  */
 void run_cmd(sYashThreadType *yash_thread_info, sCommandDetail *cmdInfo) {
+	print_done_jobs(yash_thread_info);
     if(1 < cmdInfo->cmdMatrix[0].argvSize) {
-        pid_t pid = fork();
-        if(0 == pid) {
-            setpgrp();
-            signal(SIGTSTP, SIG_DFL);
-            signal(SIGINT, SIG_DFL);
-            if((1 < cmdInfo->cmdMatrix[0].argvSize)
-            && (1 < cmdInfo->cmdMatrix[1].argvSize)) {
-                run_cmd_pipe(cmdInfo);
-            } else if (1 < cmdInfo->cmdMatrix[0].argvSize) {
-                run_cmd_regular(cmdInfo, 0);
-            }
-        } else {
-          	setpgid(pid, pid);
-          	cmdInfo->jobInfo.pgId = pid;
-            if(!(cmdInfo->isBackground)) {
-              	int status = 0;
-              	push_fg_cmd(yash_thread_info, cmdInfo);
-                waitpid(pid, &status, WUNTRACED);
-                pop_fg_cmd(yash_thread_info, cmdInfo);
-                if(SIGTSTP == status) {
-                	//push_bg_cmd(&cmdInfo);
-                } else {
-                }
-            }
-        }
+    	debug_logger("Serving Client at %s:%d",inet_ntoa(yash_thread_info->client.sin_addr), yash_thread_info->client.sin_port);
+    	yashd_logger("[%s:%d]: %s",inet_ntoa(yash_thread_info->client.sin_addr),yash_thread_info->client.sin_port, cmdInfo->jobInfo.inputString);
+    	if(!strcmp(cmdInfo->cmdMatrix[0].argv[0], "jobs")) {
+    		jobs(yash_thread_info);
+    	} else if(!strcmp(cmdInfo->cmdMatrix[0].argv[0], "bg")) {
+    		bg(yash_thread_info);
+    	} else if(!strcmp(cmdInfo->cmdMatrix[0].argv[0], "fg")) {
+    		fg(yash_thread_info);
+    	} else {
+    		fork_exec(yash_thread_info, cmdInfo);
+    	}
     }
 }
-/*
- * @Function:   reclaim_tc
- * @brief:      Helper function that will give terminal back to yash
- */
-/*static void reclaim_tc(siginfo_t *siginfo)
-{
-    if((siginfo->si_pid == tcgetpgrp(STDIN_FILENO))
-    || (getpgid(siginfo->si_pid) == tcgetpgrp(STDIN_FILENO)))
-    {
-        if (-1 == tcsetpgrp(STDIN_FILENO, getpid()))
-        {
-            perror("tcsetpgrp failed");
-        }
-    }
-}*/
-/*
- * @Function:   sig_action_hdlr
- * @brief:      Responds to Children Interrupts, takes actions to manage them
- */
-/*static void sig_action_hdlr (int sig, siginfo_t *siginfo, void *context)
-{
-    int status = 0;
-
-    if(siginfo->si_status == 0 || siginfo->si_status == SIGHUP)
-    {
-        sJobType jobEntry = {.pgId = siginfo->si_pid, .status = PROC_DONE};
-        if(jobsTable[FG_JOB_INDEX].pgId == siginfo->si_pid)
-        {
-            reclaim_tc(siginfo);
-            remove_job(FG_JOB_INDEX);
-        }
-        else
-        {
-            update_job(&(jobEntry));
-        }
-    }
-    else if(siginfo->si_status == SIGINT)
-    {
-        reclaim_tc(siginfo);
-        remove_job(FG_JOB_INDEX);
-    }
-    else if(siginfo->si_status == SIGTSTP)
-    {
-        reclaim_tc(siginfo);
-        jobsTable[FG_JOB_INDEX].status = PROC_STOP;
-        push_job(&(jobsTable[FG_JOB_INDEX]), false);
-        remove_job(FG_JOB_INDEX);
-    }
-    waitpid(-1, &status, WNOHANG);
-}*/
-
-/*
- * @Function:   yash_sig_init
- * @brief:      Configures signal settings for the yash shell
- *              Children inherit these settings
- */
-/*static int yash_sig_init()
-{
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTSTP, SIG_IGN);
-    signal(SIGCHLD, SIG_IGN);
-    signal(SIGTTOU, SIG_IGN);
-    signal(SIGTTIN, SIG_IGN);
-    struct sigaction act;
- 
-    memset (&act, '\0', sizeof(act));
- 
-	act.sa_sigaction = &(sig_action_hdlr);
-	act.sa_flags = SA_SIGINFO | SA_NOCLDWAIT | SA_RESTART;
- 
-	if (0 > sigaction(SIGCHLD, &act, NULL))
-	{
-		perror ("sigaction");
-		return 1;
-	}
-}*/
-/*
- * @Function:   main
- * @brief:      Executes the yash shell, and stays within that execution until interrupted
- */
-/*int main(int argc, char *argv[])
-{
-    EYashRC e_yash_rc = YASH_STATUS_OK;
-
-	if(0 != yash_sig_init())
-	{
-	    return 1;
-	}
-    while(1)
-    {
-        char *line = NULL;
-        size_t lineSize = 0;
-        size_t charNum = 0;
- 
-        printf("# ");
-        if(-1 !=(charNum = getline(&line,&lineSize,stdin)))
-        {
-            sCommandDetail cmdInfo = {0};
-            //0. Allocate Command Buffer
-            init_cmd_info(&cmdInfo);
-            //1. Parse Input into Command Buffer
-            parse_line_to_cmd(&cmdInfo, line, charNum);
-            //2. Print Done Jobs(if any)
-            print_done_jobs();
-            //3. Execute Command
-            run_cmd(&cmdInfo);
-            //4. Free Command Buffer
-            destroy_cmd_info(&cmdInfo);
-            free(line);
-        }
-        else
-        {
-            return YASH_STATUS_EXIT_GRACEFULLY;
-        }
-    }
-    
-    return (int) e_yash_rc;
-}*/

@@ -26,7 +26,6 @@ static inline void printReady(int sock_fd) {
 	int rc = write(sock_fd, READY_PROMPT, strlen(READY_PROMPT));
 }
 static inline void printReadyPlusCmd(int sock_fd, sCommandDetail *cmdInfo) {
-	char *write_buf = NULL;
 	size_t needed = snprintf(NULL, 0, "%s%s", READY_PROMPT, cmdInfo->jobInfo.inputString) + 1;
     char  *buffer = malloc(needed);
     sprintf(buffer, "%s%s", READY_PROMPT, cmdInfo->jobInfo.inputString);
@@ -87,7 +86,12 @@ void *ctl_loop(void *args) {
 			if(cmdInfo.jobInfo.pgId) {
 				switch(ctlType) {
 					case CTL_INT:
+						debug_logger("[%s]: Sending Int", __func__);
 						kill(cmdInfo.jobInfo.pgId, SIGINT);
+						break;
+					case CTL_STOP:
+						debug_logger("[%s]: Sending Stop", __func__);
+						kill(cmdInfo.jobInfo.pgId, SIGTSTP);
 						break;
 					default:;
 				}
@@ -96,11 +100,26 @@ void *ctl_loop(void *args) {
 	}
 	return NULL;
 }
+void *reap_loop(void *args) {
+	sYashThreadType *yash_thread_info = (sYashThreadType *) args;
+	debug_logger("[%s]: Entered", __func__);
+	while(1) {
+		int status = 0;
+		pid_t pid = waitpid(-1, &status, 0);
+		if(0 < pid) {
+			debug_logger("[%s]: PID: %d Wait Status: %d",__func__,pid, status);
+			if(WIFEXITED(status)) {
+				update_job_cmd(yash_thread_info, pid, PROC_DONE);
+			}
+		}
+	}
+}
 static void print_yash_thd_info(sYashThreadType *yash_thread_info) {
 	debug_logger("sock_fd", yash_thread_info->sock_fd);
 	debug_logger("cmd_pipe %d %d", yash_thread_info->cmd_pipe[0],yash_thread_info->cmd_pipe[0] );
 	debug_logger("ctl_pipe %d %d", yash_thread_info->ctl_pipe[0],yash_thread_info->ctl_pipe[0] );
 }
+
 void *yash_thread(void *args) {
     if(!args) {
     	return NULL;
@@ -123,11 +142,13 @@ void *yash_thread(void *args) {
 		sYashThreadType *ysh_thd_data = malloc(sizeof(sYashThreadType));
 
 		memcpy(ysh_thd_data, yash_thread_info, sizeof(sYashThreadType));
-		pthread_t cmd_loop_thd_id, ctl_loop_thd_id = 0;
+		pthread_t cmd_loop_thd_id, ctl_loop_thd_id, reap_loop_thd_id = 0;
 
 		close(ysh_thd_data->cmd_pipe[1]);
 		close(ysh_thd_data->ctl_pipe[1]);
 
+		close(fileno(stdout));
+		close(fileno(stderr));
 		dup2(ysh_thd_data->sock_fd, fileno(stdout));
 		dup2(ysh_thd_data->sock_fd, fileno(stderr));
 
@@ -137,6 +158,8 @@ void *yash_thread(void *args) {
 
 		} else if(pthread_create(&ctl_loop_thd_id, NULL, &ctl_loop, (void *)ysh_thd_data)) {
 
+		} else if(pthread_create(&reap_loop_thd_id, NULL, &reap_loop, (void *)ysh_thd_data)) {
+		
 		} else {
 			debug_logger("Pthread Create");
 			pthread_join(cmd_loop_thd_id, NULL);

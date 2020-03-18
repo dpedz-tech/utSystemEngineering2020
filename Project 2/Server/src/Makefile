@@ -1,6 +1,6 @@
 CC=gcc
 
-LDFLAGS=-pthread
+LDFLAGS=-pthread -lutil -std=gnu99
 ODIR=obj
 _OBJ = yashd.o yash_thread.o yash.o
 OBJ = $(patsubst %, $(ODIR)/%, $(_OBJ))

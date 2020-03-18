@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
+#include <time.h>
 #include "yashd.h"
 #include "yash_thread.h"
 
@@ -41,7 +42,6 @@ static sYashdInfo yashdInfo = {0};
  * @brief:      Inits yashd, and executes continuosly
  */
 int main(int argc, char *argv[]) {
-	//sem_init(&mutex, 0, 1);
     yashd_init();
     debug_logger("[%s]: After Daemon Init",__func__);
     socket_init();
@@ -56,11 +56,12 @@ int main(int argc, char *argv[]) {
         } else {
         	pthread_t threadId = 0;
         	sYashThreadType *yash_thread_info = NULL;
-        	debug_logger("Serving Client at %s",inet_ntoa(client.sin_addr));
+        	debug_logger("Serving Client at %s %d",inet_ntoa(client.sin_addr),client.sin_port);
         	if(!(yash_thread_info = malloc(sizeof(sYashThreadType)))) {
         		debug_logger("Could not Alloc Mem");
         	} else {
         		yash_thread_info->sock_fd = client_sock;
+        		memcpy(&(yash_thread_info->client), &client, sizeof(client));
         		if(pthread_create(&threadId, NULL, &yash_thread, (void *)yash_thread_info)) {
         			debug_logger("Failed to spawn Helper");
         		} else {
@@ -192,4 +193,21 @@ void debug_logger(const char* format, ...) {
     va_end(args);
 
 	dprintf(yashdInfo.debugLog,"[%lu]: %s\n",pthread_self(),logLine);
+}
+
+void yashd_logger(const char* format, ...) {
+	char logLine[200] = {0};
+	char timeBuf[100] = {0};
+
+	va_list args;
+    va_start(args, format);
+    vsnprintf(logLine, 200, format, args);
+    va_end(args);
+
+	time_t t = time(NULL);
+	struct tm * p = localtime(&t);
+
+	strftime(timeBuf, 100, "%b %d %X", p);
+
+	dprintf(yashdInfo.yashdLog,"%s yashd%s\n",timeBuf,logLine);
 }
