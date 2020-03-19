@@ -20,7 +20,8 @@
 #include "yashd.h"
 #include "yash_thread.h"
 
-#define REDIR_FILE_MASK (O_TRUNC | O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)
+#define REDIR_FILE_MASK O_TRUNC | O_WRONLY | O_CREAT
+#define FILEPERMISSIONS S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH
 
 void debug_logger(const char* format, ...);
 
@@ -188,6 +189,7 @@ void parse_line_to_cmd(sCommandDetail *cmdInfo, char *line, size_t charNum) {
  *              If input redirection fails, return a yash error
  */
 static void conf_redirection(sCommandDetail *cmdInfo, int cmdIndex) {
+    debug_logger("[%s]: Here",__func__);
     if(cmdInfo->cmdMatrix[cmdIndex].isStdInRedirect) {
         if(-1 == (access(cmdInfo->cmdMatrix[cmdIndex].stdInRedirectFileStr, R_OK))) {
             printf("yash: %s: No such file or directory\n",cmdInfo->cmdMatrix[cmdIndex].stdInRedirectFileStr);
@@ -199,15 +201,20 @@ static void conf_redirection(sCommandDetail *cmdInfo, int cmdIndex) {
         }
     }
     if(cmdInfo->cmdMatrix[cmdIndex].isStdOutRedirect) {
-        int std_out_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdOutRedirectFileStr, REDIR_FILE_MASK);
+        int std_out_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdOutRedirectFileStr, O_TRUNC|O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
         if((-1 != std_out_redir_fd) && (-1 != dup2(std_out_redir_fd, fileno(stdout)))) {
-            fflush(stdout); close(std_out_redir_fd);
+            fflush(stdout); 
+            close(std_out_redir_fd);
+        }else{
+           debug_logger("No Permissions to create or read file");
         }
     }
     if(cmdInfo->cmdMatrix[cmdIndex].isStdErrRedirect) {
-        int std_err_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdErrRedirectFileStr, REDIR_FILE_MASK);
+        int std_err_redir_fd = open(cmdInfo->cmdMatrix[cmdIndex].stdErrRedirectFileStr,  O_TRUNC|O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
         if((-1 != std_err_redir_fd) && (-1 != dup2(std_err_redir_fd, fileno(stderr)))) {
             fflush(stderr); close(std_err_redir_fd);
+        }else{
+            debug_logger("No Permissions to create or read file");       
         }
     }
 }
