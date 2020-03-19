@@ -16,4 +16,4 @@ yashd : $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 clean :
-	rm yashd yashd.o yash_thread.o
+	rm yashd obj/yashd.o obj/yash_thread.o obj/yash.o
