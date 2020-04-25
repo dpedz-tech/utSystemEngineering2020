@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,14 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+typedef struct {
+    struct file *pFile;
+}file_desc_entry;
+
+typedef struct {
+    file_desc_entry fdt[128];
+}file_desc_helper;//File Descriptor Table
 
 /* A kernel thread or user process.
 
@@ -92,6 +101,8 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    
+    file_desc_helper fdh;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
