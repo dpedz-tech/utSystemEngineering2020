@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 #include "filesys/file.h"
 
 /* States in a thread's life cycle. */
@@ -98,6 +99,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct file *file_to_exe;           /* File Descriptor for the Executable */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -125,6 +127,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
+struct thread *ptr_thread_create (const char *name, int priority, thread_func *, void *);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);

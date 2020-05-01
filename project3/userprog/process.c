@@ -23,12 +23,57 @@
 
 #include <log.h>
 
-struct semaphore launched; // really belongs to the thread struct
-struct semaphore exiting; // really belongs to the thread struct
-
 static thread_func start_process NO_RETURN;
+static thread_func start_child_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+//static struct list list_processes = LIST_INITIALIZER (list_processes);//Use this list to have all the return codes for all processes, and pid_t
+static sSemType semList[100] = {0};
+static sProcType procList[100] = {0};
+
+static struct lock list_lock;
+static struct lock sem_list_lock;
+static struct lock thread_create_lock;
+
+static bool first_pass = true;
+
+void process_init(void) {
+  //list_init(&list_processes);
+}
+sProcType *fetch_process(tid_t tid) {
+  for(int i = 0; i < 100; i++) {
+    if(procList[i].tid == tid) {
+      return &(procList[i]);
+    }
+  }
+  return NULL;
+}
+
+int add_proc_list_entry(sProcType *process) {
+  for(int i = 0; i < 100; i++) {
+    if(!procList[i].tid) {
+      memset(&(procList[i]), 0, sizeof(sProcType));
+      memcpy(&(procList[i]), process, sizeof(sProcType));
+      return i;
+    }
+  }
+  return -1;
+}
+/*
+ * @brief:  This function will add a semaphore pair to the static structure
+ *          semList such that any user or kernel context can access semaphore pairings.
+ */
+int add_sem_list_entry(void) {
+  for(int i = 0; i < 100; i++) {
+    if(!semList[i].present){
+      sema_init(&(semList[i].launched), 0);
+      sema_init(&(semList[i].exiting), 0);
+      semList[i].present = 1;
+      return i;
+    }
+  }
+  return -1;
+}
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -38,6 +83,12 @@ process_execute (const char *command)
 {
   char *cmd_copy;
   tid_t tid;
+  
+  if(first_pass) {
+    lock_init(&list_lock);
+    lock_init(&sem_list_lock);
+    lock_init(&thread_create_lock);
+  }
 
   // NOTE:
   // To see this print, make sure LOGGING_LEVEL in this file is <= L_TRACE (6)
@@ -51,14 +102,27 @@ process_execute (const char *command)
   if (cmd_copy == NULL)
     return TID_ERROR;
   strlcpy(cmd_copy, command, PGSIZE);
+  
 
-  sema_init(&launched,0); //t->launched later
-  sema_init(&exiting,0);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, cmd_copy);
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page (cmd_copy);
-  sema_down(&launched);
+  } else {
+    sProcType proc_data = {0};
+    
+    proc_data.tid = tid;
+    if(!first_pass) {
+      proc_data.parent_tid = thread_current()->tid;
+    }
+    proc_data.sem_list_idx = add_sem_list_entry();
+    list_init(&(proc_data.child_list));
+    
+    add_proc_list_entry(&proc_data);
+    sema_down(&(semList[proc_data.sem_list_idx].launched));
+  }
+  
+  first_pass = false;
   return tid;
 }
 
@@ -86,8 +150,9 @@ start_process (void *command)
   /* If load failed, quit. */
   palloc_free_page (command);
   if (!success)
-    thread_exit ();
-  sema_up(&launched);
+    sys_exit(-1);
+  sema_up(&(semList[fetch_process(thread_current()->tid)->sem_list_idx].launched));
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -110,11 +175,56 @@ start_process (void *command)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-    // Wait for the child to exit and reap the childs exit status
-    //TODO: WE need to to update this
-    sema_down(&exiting);
-    // here means child has exited; get childs exit status form its thread
+  // Wait for the child to exit and reap the childs exit status
+  //TODO: WE need to to update this
+  //First Check if TID is valid
+  //while(1){}
+  int sem_list_idx = -1;
+  sProcType *p = fetch_process(child_tid);
 
+  if(NULL == p) {
+    return -1;
+  } else {
+    sem_list_idx = p->sem_list_idx;
+  }
+  if(-1 != sem_list_idx) {
+    sema_down(&(semList[sem_list_idx].exiting));
+    semList[sem_list_idx].present = false;
+  }
+  int exit_status = p->exit_status;
+  memset(p, 0, sizeof(sProcType));
+  return (exit_status);
+  // here means child has exited; get childs exit status form its thread
+  // printf("Wait : %s %d\n",thread_current()->name, child_tid);
+  // struct list_elem *e;
+
+  // struct child *ch=NULL;
+  // struct list_elem *e1=NULL;
+
+  // for (e = list_begin (&thread_current()->child_proc); e != list_end (&thread_current()->child_proc);
+  //         e = list_next (e))
+  //       {
+  //         struct child *f = list_entry (e, struct child, elem);
+  //         if(f->tid == child_tid)
+  //         {
+  //           ch = f;
+  //           e1 = e;
+  //         }
+  //       }
+
+
+  // if(!ch || !e1)
+  //   return -1;
+
+  // thread_current()->waitingon = ch->tid;
+    
+  // if(!ch->used)
+  // sema_down(&thread_current()->child_lock);
+
+  // int temp = ch->exit_error;
+  // list_remove(e1);
+  
+  // return temp;
 }
 
 /* Free the current process's resources. */
@@ -141,7 +251,15 @@ process_exit (void)
       pagedir_destroy (pd);
     }
     //TODO: We need to update this for mulitple terms
-  sema_up(&exiting);
+  int sem_list_idx = -1;
+  sProcType *p = fetch_process(thread_current()->tid);
+  if(p) {
+    sem_list_idx = p->sem_list_idx;
+  }
+  if(sem_list_idx != -1) {
+    sema_up(&(semList[sem_list_idx].exiting));
+  }
+  
 }
 
 /* Sets up the CPU for running user code in the current
@@ -286,7 +404,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
       || ehdr.e_phnum > 1024)
     {
       printf ("load: %s: error loading executable\n", file_name);
-      goto done;
+      sys_exit(12);
     }
 
   /* Read program headers. */
@@ -356,10 +474,15 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
-
+ 
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  if(success) {
+    thread_current()->file_to_exe = filesys_open(file_name);
+    file_deny_write(thread_current()->file_to_exe);
+  }
+
   return success;
 }
 

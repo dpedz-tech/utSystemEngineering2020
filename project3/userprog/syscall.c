@@ -7,24 +7,11 @@
 #include "filesys/filesys.h"
 #include "filesys/directory.h"
 #include "userprog/pagedir.h"
-
-typedef int pid_t;
+#include "userprog/syscall.h"
+#include "string.h"
+#include "process.h"
 
 static void syscall_handler (struct intr_frame *);
-static int sys_write(int fd, const void *buffer, unsigned size);
-static void sys_halt(void);
-static int sys_exit(int status);
-static int sys_exec(const char *cmd_line);
-static int sys_wait(pid_t pid);
-static bool sys_create(const char *file, unsigned initial_size);
-static bool sys_remove(const char *file);
-static int sys_open(const char *file);
-static int sys_filesize(int fd);
-static int sys_read(int fd, void *buffer, unsigned size);
-static void sys_seek(int fd, unsigned position);
-static unsigned sys_tell(int fd);
-static void sys_close(int fd);
-
 
 bool
 usr_ptr_check(const void *ptr) {
@@ -185,18 +172,27 @@ syscall_handler (struct intr_frame *f UNUSED)
   }
 }
 
-static void sys_halt(void) {
+ void sys_halt(void) {
   shutdown_power_off();
 }
-static int sys_exit(int status) {
+ int sys_exit(int status) {
   struct thread *curThread = thread_current();
   char nameSingle[100] = {0}; char *nameSinglePtr = &nameSingle;
   strlcpy(nameSingle, curThread->name, strlen(curThread->name) + 1);
   printf("%s: exit(%d)\n",strtok_r(nameSingle, " ", &nameSinglePtr),status);
+  for(int i = 0; i < 128; i++) {
+    sys_close(i);
+  }
+  if(curThread->file_to_exe) {
+    file_close(curThread->file_to_exe);
+    curThread->file_to_exe = NULL;
+  }
+  sProcType *p = fetch_process(curThread->tid);
+  p->exit_status = status;
   thread_exit();
 }
 
-static int sys_write(int fd, const void *buffer, unsigned size) {
+ int sys_write(int fd, const void *buffer, unsigned size) {
   if(0 == fd) {
     return 0;
   } else if(1 == fd) {
@@ -214,12 +210,35 @@ static int sys_write(int fd, const void *buffer, unsigned size) {
   }
 }
 
-static pid_t sys_exec(const char *cmd_line) {
-  return -1;
+ pid_t sys_exec(const char *cmd_line) {
+    // acquire_filesys_lock();
+   char * fn_cp = malloc (strlen(cmd_line)+1);
+	 strlcpy(fn_cp, cmd_line, strlen(cmd_line)+1);
+	  
+	 char * save_ptr;
+	 fn_cp = strtok_r(fn_cp," ",&save_ptr);
+
+	 struct file* f = filesys_open (fn_cp);
+
+	 if(f==NULL)
+	 {
+	  	// release_filesys_lock();
+	  	return -1;
+	 }
+	 else
+	 {
+	  	file_close(f);
+	  	// release_filesys_lo
+	  	tid_t tid = process_execute(cmd_line);//make this function return a thread structure
+	  	//add this thread structure as a list element
+	  	return (pid_t) tid;
+	  }
 }
 
-static int sys_wait(pid_t pid) {
-  return -1;
+
+ int sys_wait(pid_t pid) {
+  int rc = process_wait(pid);
+  return rc;
 }
 /*
   Creates a new file called file initially initial size bytes in size.
@@ -227,7 +246,7 @@ static int sys_wait(pid_t pid) {
   not open it: opening the new file is a separate operation which would
   require a open system call.
 */
-static bool sys_create(const char *file, unsigned initial_size) {
+ bool sys_create(const char *file, unsigned initial_size) {
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
     return false;
   } else {
@@ -239,7 +258,7 @@ static bool sys_create(const char *file, unsigned initial_size) {
   removed regardless of whether it is open or closed, and removing an open file does
   not close it.
 */
-static bool sys_remove(const char *file) {
+ bool sys_remove(const char *file) {
   if(strlen(file) < NAME_MAX || strlen(file) == 0) {
     return false;
   } else {
@@ -247,7 +266,7 @@ static bool sys_remove(const char *file) {
   }
 }
 
-static int sys_open(const char *file) {
+ int sys_open(const char *file) {
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
     return -1;
   } else {
@@ -259,7 +278,7 @@ static int sys_open(const char *file) {
     }
   }
 }
-static int sys_filesize(int fd) {
+ int sys_filesize(int fd) {
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
@@ -270,7 +289,7 @@ static int sys_filesize(int fd) {
   }
 }
 
-static int sys_read(int fd, void *buffer, unsigned size) {
+ int sys_read(int fd, void *buffer, unsigned size) {
   if(1 == fd) {
     return 0;
   } else if(0 == fd) {
@@ -291,15 +310,15 @@ static int sys_read(int fd, void *buffer, unsigned size) {
   }
 }
 
-static void sys_seek(int fd, unsigned position) {
+ void sys_seek(int fd, unsigned position) {
   
 }
 
-static unsigned sys_tell(int fd) {
+ unsigned sys_tell(int fd) {
   return 0;
 }
 
-static void sys_close(int fd) {
+ void sys_close(int fd) {
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
