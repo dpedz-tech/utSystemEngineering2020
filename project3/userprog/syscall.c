@@ -12,11 +12,8 @@
 #include "string.h"
 #include "process.h"
 
+
 static void syscall_handler (struct intr_frame *);
-
-struct lock filesys_lock;
-
-
 
 bool
 usr_ptr_check(const void *ptr) {
@@ -69,6 +66,10 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
+  if(lock_held_by_current_thread(&filesys_lock)){
+    printf("TID: %d has lock\n",thread_current()->tid);
+  }
+  
   if(false == usr_ptr_check(f->esp)) {
     sys_exit(-1);
   }
@@ -88,7 +89,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == str_check(*(char **)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_exec(*(char **)(f->esp + 4));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_WAIT:
@@ -104,7 +107,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == str_check(*(char **)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_create((*(char **)(f->esp + 4)), (*(unsigned *)(f->esp + 8)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_REMOVE:
@@ -112,7 +117,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == str_check(*(char **)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_remove(*(char **)(f->esp + 4));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_OPEN:
@@ -120,14 +127,18 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == str_check(*(char **)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_open((*(const char **)(f->esp + 4)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_FILESIZE:
       if(false == usr_ptr_check((void *)(f->esp + 4))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_filesize(*((int *)(f->esp + 4)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_READ:
@@ -137,7 +148,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == buf_check(*(void **)(f->esp + 8), *(unsigned *)(f->esp + 12)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_read((*(int *)(f->esp + 4)), (*(void **)(f->esp + 8)), (*(unsigned *)(f->esp + 12)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_WRITE:
@@ -147,7 +160,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == buf_check(*(void **)(f->esp + 8), *(unsigned *)(f->esp + 12)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         f->eax = sys_write((*(int *)(f->esp + 4)), (*(void **)(f->esp + 8)), (*(unsigned *)(f->esp + 12)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_SEEK:
@@ -155,14 +170,18 @@ syscall_handler (struct intr_frame *f UNUSED)
       || (false == usr_ptr_check((void *)(f->esp + 8)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         sys_seek(*((int *)(f->esp + 4)), *((unsigned *)(f->esp + 8)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_TELL:
       if((false == usr_ptr_check((void *)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
+        lock_acquire (&filesys_lock);
         sys_tell(*((int *)(f->esp + 4)));
+        lock_release (&filesys_lock);
       }
       break;
     case SYS_CLOSE:
@@ -208,9 +227,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   } else if(fd > 1 && fd < 128){
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      lock_acquire (&filesys_lock);
       return_code = ((int)file_write (pFile, buffer, size));
-      lock_release (&filesys_lock);
     } else {
       return_code = -1; 
     }
@@ -263,9 +280,9 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
     return_code = false;
   } else {
-    lock_acquire (&filesys_lock);
+    // lock_acquire (&filesys_lock);
     return_code = filesys_create(file, initial_size);
-    lock_release (&filesys_lock);
+    // lock_release (&filesys_lock);
   }
   return return_code;
 }
@@ -276,12 +293,12 @@ syscall_handler (struct intr_frame *f UNUSED)
 */
  bool sys_remove(const char *file) {
   bool return_code;   
-  if(strlen(file) < NAME_MAX || strlen(file) == 0) {
+  if(strlen(file) > NAME_MAX || strlen(file) == 0) {
     return_code = false;
   } else {
-    lock_acquire (&filesys_lock);
+    // lock_acquire (&filesys_lock);
     return_code = filesys_remove(file);
-    lock_release (&filesys_lock);
+    // lock_release (&filesys_lock);
   }
   return return_code;
 }
@@ -291,9 +308,9 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
     return_code = -1;
   } else {
-    lock_acquire (&filesys_lock);
+    // lock_acquire (&filesys_lock);
     struct file *pFile = filesys_open(file);
-    lock_release (&filesys_lock);
+    // lock_release (&filesys_lock);
     if(pFile) {
       return_code = add_fdt_entry(pFile);
     } else {
@@ -315,24 +332,28 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
 
  int sys_read(int fd, void *buffer, unsigned size) {
+   int return_code;
   if(1 == fd) {
-    return 0;
+    return_code = 0;
   } else if(0 == fd) {
     char *buffer_ch = (char *) buffer;
     for(int i = 0; i < size; i++) {
       buffer_ch[i] = input_getc();
     }
-    return size;
+    return_code = size;
   } else if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      return ((int)file_read (pFile, buffer, size));
+      // lock_acquire (&filesys_lock);
+      return_code= ((int)file_read (pFile, buffer, size));
+      // lock_release (&filesys_lock);
     } else {
-      return -1; 
+      return_code = -1; 
     }
   } else {
-    return -1;
+    return_code = -1;
   }
+  return return_code;
 }
 
 void sys_seek (int fd, unsigned position)
@@ -340,9 +361,9 @@ void sys_seek (int fd, unsigned position)
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      lock_acquire (&filesys_lock);
+      // lock_acquire (&filesys_lock);
       file_seek(pFile, position);
-      lock_release (&filesys_lock);
+      // lock_release (&filesys_lock);
     }
   }
 }
@@ -354,9 +375,9 @@ unsigned sys_tell (int fd)
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      lock_acquire (&filesys_lock);
+      // lock_acquire (&filesys_lock);
       ret= file_tell(pFile);
-      lock_release (&filesys_lock);
+      // lock_release (&filesys_lock);
     }
   }
   return ret;
@@ -371,6 +392,3 @@ unsigned sys_tell (int fd)
     }
   }
 }
-
-
-

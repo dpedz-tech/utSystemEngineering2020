@@ -5,6 +5,7 @@
 #include "string.h"
 
 typedef int pid_t;
+struct lock filesys_lock;
 
 void syscall_init (void);
 int sys_write(int fd, const void *buffer, unsigned size);
