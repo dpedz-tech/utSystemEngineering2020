@@ -194,37 +194,6 @@ process_wait (tid_t child_tid UNUSED)
   int exit_status = p->exit_status;
   memset(p, 0, sizeof(sProcType));
   return (exit_status);
-  // here means child has exited; get childs exit status form its thread
-  // printf("Wait : %s %d\n",thread_current()->name, child_tid);
-  // struct list_elem *e;
-
-  // struct child *ch=NULL;
-  // struct list_elem *e1=NULL;
-
-  // for (e = list_begin (&thread_current()->child_proc); e != list_end (&thread_current()->child_proc);
-  //         e = list_next (e))
-  //       {
-  //         struct child *f = list_entry (e, struct child, elem);
-  //         if(f->tid == child_tid)
-  //         {
-  //           ch = f;
-  //           e1 = e;
-  //         }
-  //       }
-
-
-  // if(!ch || !e1)
-  //   return -1;
-
-  // thread_current()->waitingon = ch->tid;
-    
-  // if(!ch->used)
-  // sema_down(&thread_current()->child_lock);
-
-  // int temp = ch->exit_error;
-  // list_remove(e1);
-  
-  // return temp;
 }
 
 /* Free the current process's resources. */
@@ -233,10 +202,11 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
-
+ 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
+
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -254,10 +224,16 @@ process_exit (void)
   int sem_list_idx = -1;
   sProcType *p = fetch_process(thread_current()->tid);
   if(p) {
+    // acquire_filesys_lock();
+
     sem_list_idx = p->sem_list_idx;
+    
+    // release_filesys_lock();
   }
   if(sem_list_idx != -1) {
+    // acquire_filesys_lock();
     sema_up(&(semList[sem_list_idx].exiting));
+    // release_filesys_lock();
   }
   
 }
@@ -277,7 +253,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -485,7 +461,7 @@ load (const char *cmdstr, void (**eip) (void), void **esp)
 
   return success;
 }
-
+
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);

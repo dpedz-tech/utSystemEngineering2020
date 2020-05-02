@@ -103,7 +103,6 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-    
     file_desc_helper fdh;
 
 #ifdef USERPROG

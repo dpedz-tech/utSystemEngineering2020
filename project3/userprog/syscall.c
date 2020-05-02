@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -12,6 +13,10 @@
 #include "process.h"
 
 static void syscall_handler (struct intr_frame *);
+
+struct lock filesys_lock;
+
+
 
 bool
 usr_ptr_check(const void *ptr) {
@@ -57,6 +62,7 @@ add_fdt_entry(struct file *pFile) {
 void
 syscall_init (void)
 {
+  lock_init (&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -156,7 +162,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       if((false == usr_ptr_check((void *)(f->esp + 4)))) {
         sys_exit(-1);
       } else {
-        f->eax = sys_tell(*((int *)(f->esp + 4)));
+        sys_tell(*((int *)(f->esp + 4)));
       }
       break;
     case SYS_CLOSE:
@@ -193,25 +199,28 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
 
  int sys_write(int fd, const void *buffer, unsigned size) {
+   int return_code;
   if(0 == fd) {
-    return 0;
+    return_code = 0;
   } else if(1 == fd) {
     putbuf(buffer, size);
-    return size;
+    return_code = size;
   } else if(fd > 1 && fd < 128){
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      return ((int)file_write (pFile, buffer, size));
+      lock_acquire (&filesys_lock);
+      return_code = ((int)file_write (pFile, buffer, size));
+      lock_release (&filesys_lock);
     } else {
-      return -1; 
+      return_code = -1; 
     }
   } else {
-    return -1;
+    return_code= -1;
   }
+  return return_code;
 }
 
  pid_t sys_exec(const char *cmd_line) {
-    // acquire_filesys_lock();
    char * fn_cp = malloc (strlen(cmd_line)+1);
 	 strlcpy(fn_cp, cmd_line, strlen(cmd_line)+1);
 	  
@@ -222,15 +231,17 @@ syscall_handler (struct intr_frame *f UNUSED)
 
 	 if(f==NULL)
 	 {
-	  	// release_filesys_lock();
 	  	return -1;
 	 }
 	 else
 	 {
 	  	file_close(f);
-	  	// release_filesys_lo
+	  	// lock_acquire (&filesys_lock);
+	  	
 	  	tid_t tid = process_execute(cmd_line);//make this function return a thread structure
 	  	//add this thread structure as a list element
+	  	// lock_release (&filesys_lock);
+
 	  	return (pid_t) tid;
 	  }
 }
@@ -247,11 +258,16 @@ syscall_handler (struct intr_frame *f UNUSED)
   require a open system call.
 */
  bool sys_create(const char *file, unsigned initial_size) {
+   
+  bool return_code;   
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
-    return false;
+    return_code = false;
   } else {
-    return filesys_create(file, initial_size);
+    lock_acquire (&filesys_lock);
+    return_code = filesys_create(file, initial_size);
+    lock_release (&filesys_lock);
   }
+  return return_code;
 }
 /*
   Deletes the file called file. Returns true if successful, false otherwise. A file may be
@@ -259,25 +275,34 @@ syscall_handler (struct intr_frame *f UNUSED)
   not close it.
 */
  bool sys_remove(const char *file) {
+  bool return_code;   
   if(strlen(file) < NAME_MAX || strlen(file) == 0) {
-    return false;
+    return_code = false;
   } else {
-    return filesys_remove(file);
+    lock_acquire (&filesys_lock);
+    return_code = filesys_remove(file);
+    lock_release (&filesys_lock);
   }
+  return return_code;
 }
 
  int sys_open(const char *file) {
+  int return_code;
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
-    return -1;
+    return_code = -1;
   } else {
+    lock_acquire (&filesys_lock);
     struct file *pFile = filesys_open(file);
+    lock_release (&filesys_lock);
     if(pFile) {
-      return add_fdt_entry(pFile);
+      return_code = add_fdt_entry(pFile);
     } else {
-      return -1; 
+      return_code = -1; 
     }
   }
+  return return_code;
 }
+
  int sys_filesize(int fd) {
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
@@ -310,12 +335,31 @@ syscall_handler (struct intr_frame *f UNUSED)
   }
 }
 
- void sys_seek(int fd, unsigned position) {
-  
+void sys_seek (int fd, unsigned position)
+{
+  if(fd > 1 && fd < 128) {
+    struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
+    if(pFile) {
+      lock_acquire (&filesys_lock);
+      file_seek(pFile, position);
+      lock_release (&filesys_lock);
+    }
+  }
 }
 
- unsigned sys_tell(int fd) {
-  return 0;
+
+unsigned sys_tell (int fd)
+{ 
+  unsigned ret;
+  if(fd > 1 && fd < 128) {
+    struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
+    if(pFile) {
+      lock_acquire (&filesys_lock);
+      ret= file_tell(pFile);
+      lock_release (&filesys_lock);
+    }
+  }
+  return ret;
 }
 
  void sys_close(int fd) {
@@ -327,3 +371,6 @@ syscall_handler (struct intr_frame *f UNUSED)
     }
   }
 }
+
+
+
