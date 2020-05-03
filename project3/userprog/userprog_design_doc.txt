@@ -9,7 +9,7 @@
 >> Fill in the names and email addresses of your group members.
 
 Dale Pedzinski <pedzindm@utexas.edu>
-Alex <email@utexas.edu>
+Alex Hoganson <email@utexas.edu>
 
 ---- PRELIMINARIES ----
 
@@ -28,15 +28,26 @@ Alex <email@utexas.edu>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+None
+
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
+We separated the tokens and the commands then passed down the arguments. Our implementation
+checked for validaty on every call, if there was an invalid piece then the process would exit.
+
+
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+Pintos needs to be able reach the arguments later in the processes so we use strtok_r
+because it requires the pointer to be provided by the caller.
+
 
                              SYSTEM CALLS
                              ============
@@ -47,14 +58,78 @@ Alex <email@utexas.edu>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+
+Process.h
+    typedef struct sSemType{
+        struct semaphore launched;
+        struct semaphore exiting;
+        int present;
+    }sSemType;
+    
+    typedef struct sProcType{
+        struct list_elem elem;
+    
+        tid_t tid;
+        tid_t parent_tid;
+        int sem_list_idx;
+        int exit_status;
+        struct list child_list;
+    }sProcType;
+Thread.c
+    struct thread *ptr_thread_create (const char *name, int priority,
+                   thread_func *function, void *aux)
+    {
+      struct thread *t;
+      struct kernel_thread_frame *kf;
+      struct switch_entry_frame *ef;
+      struct switch_threads_frame *sf;
+      tid_t tid;
+    
+      ASSERT (function != NULL);
+    
+      /* Allocate thread. */
+      t = palloc_get_page (PAL_ZERO);
+      if (t == NULL)
+        return NULL;
+    
+      /* Initialize thread. */
+      init_thread (t, name, priority);
+      tid = t->tid = allocate_tid ();
+      
+      /* Stack frame for kernel_thread(). */
+      kf = alloc_frame (t, sizeof *kf);
+      kf->eip = NULL;
+      kf->function = function;
+      kf->aux = aux;
+    
+      /* Stack frame for switch_entry(). */
+      ef = alloc_frame (t, sizeof *ef);
+      ef->eip = (void (*) (void)) kernel_thread;
+    
+      /* Stack frame for switch_threads(). */
+      sf = alloc_frame (t, sizeof *sf);
+      sf->eip = switch_entry;
+      sf->ebp = 0;
+      /* Add to run queue. */
+      thread_unblock (t);
+    
+      return t;
+    }
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+single process within syscall. 
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+We check for valid buffer sizes on the pointers. Then acquire a file system lock. 
+Once the lock is acquired then the use the syscalls to perform an action on the files. 
+
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -63,8 +138,39 @@ Alex <email@utexas.edu>
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+The least possinle number of inspections would be 1 but depending on the access it could
+be 4096 checks or 2. 
+
+For 2 bytes of data, the least would be 1 and most would be 2. 
+
+We don’t see much room to improve. 
+
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+We implement wait-syscall in term of process_wait.
+
+  // Wait for the child to exit and reap the childs exit status
+  //TODO: WE need to to update this
+  //First Check if TID is valid
+  //while(1){}
+  int sem_list_idx = -1;
+  sProcType *p = fetch_process(child_tid);
+
+  if(NULL == p) {
+    return -1;
+  } else {
+    sem_list_idx = p->sem_list_idx;
+  }
+  if(-1 != sem_list_idx) {
+    sema_down(&(semList[sem_list_idx].exiting));
+    semList[sem_list_idx].present = false;
+  }
+  int exit_status = p->exit_status;
+  memset(p, 0, sizeof(sProcType));
+  return (exit_status);
+
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -80,12 +186,25 @@ Alex <email@utexas.edu>
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+We check for bad user memory access within the validating step.
+For example, the “write” system call, the  pointer and
+the arguments pointer will be checked first. Then if anything is
+invalid, terminate the process.
+
+If an error still happens, we can handle it in the page_fault exception. 
+
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+The exec system call creates a child thread that executes. If anything odd happens, 
+a -1 is returned. Our design isolates the parent from the child. If the child process exits,
+the return value is sent to the parent process via the parent_id.
+
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -94,16 +213,27 @@ Alex <email@utexas.edu>
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+In most of these cases, the child is responsible to set it’s status in parent’s thread struct.
+When the parent exits, the list inside it will be free.
+
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+We chose to do it this way to validate the memory and user before access is granted.
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
+ We limited the number of files to 128 to limit the size of the kernal space which is both
+ an advantage on size but a disadvantage on the design of the application.
 
->> B11: The default tid_t to pid_t mapping is the identity mapping.
+
+>> B11: The default tid_t to pid_t mapping iws the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+N/A
 
                            SURVEY QUESTIONS
                            ================

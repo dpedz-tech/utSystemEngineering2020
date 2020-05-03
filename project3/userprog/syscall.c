@@ -2,7 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <syscall-nr.h>
+#include "devices/input.h"
+#include "devices/shutdown.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "filesys/filesys.h"
@@ -12,10 +15,9 @@
 #include "string.h"
 #include "process.h"
 
-
 static void syscall_handler (struct intr_frame *);
 
-bool
+static bool
 usr_ptr_check(const void *ptr) {
   if(!ptr || !is_user_vaddr(ptr) || NULL == pagedir_get_page(thread_current()->pagedir, ptr)) {
     return false;
@@ -24,7 +26,7 @@ usr_ptr_check(const void *ptr) {
   }
 }
 
-bool
+static bool
 str_check(const char *str) {
   for(int str_idx = 0; true == usr_ptr_check((void *)(str + str_idx)); str_idx++) {
       if(str[str_idx] == 0) {
@@ -34,7 +36,7 @@ str_check(const char *str) {
   return false;
 }
 
-bool
+static bool
 buf_check(const void *buffer, unsigned size) {
   for(unsigned buf_idx = 0; true == usr_ptr_check(buffer + buf_idx); buf_idx++) {
     if((0 == size) || (buf_idx == size - 1)) {
@@ -44,7 +46,7 @@ buf_check(const void *buffer, unsigned size) {
   return false;
 }
 
-int
+static int
 add_fdt_entry(struct file *pFile) {
   struct thread *thr = thread_current();
   for(int i = 2; i < 128; i++) {
@@ -66,10 +68,6 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
-  if(lock_held_by_current_thread(&filesys_lock)){
-    printf("TID: %d has lock\n",thread_current()->tid);
-  }
-  
   if(false == usr_ptr_check(f->esp)) {
     sys_exit(-1);
   }
@@ -196,13 +194,22 @@ syscall_handler (struct intr_frame *f UNUSED)
       thread_exit();
   }
 }
-
- void sys_halt(void) {
+/*
+  Terminates Pintos by calling shutdown_power_off() (declared in
+  ‘devices/shutdown.h’). This should be seldom used, because you lose
+  some information about possible deadlock situations, etc.
+ */
+void sys_halt(void) {
   shutdown_power_off();
 }
- int sys_exit(int status) {
+/*
+  Terminates the current user program, returning status to the kernel. If the process’s
+  parent waits for it (see below), this is the status that will be returned. Conventionally,
+  a status of 0 indicates success and nonzero values indicate errors.
+ */
+int sys_exit(int status) {
   struct thread *curThread = thread_current();
-  char nameSingle[100] = {0}; char *nameSinglePtr = &nameSingle;
+  char nameSingle[100] = {0}; char *nameSinglePtr = (char *) &nameSingle;
   strlcpy(nameSingle, curThread->name, strlen(curThread->name) + 1);
   printf("%s: exit(%d)\n",strtok_r(nameSingle, " ", &nameSinglePtr),status);
   for(int i = 0; i < 128; i++) {
@@ -213,28 +220,28 @@ syscall_handler (struct intr_frame *f UNUSED)
     curThread->file_to_exe = NULL;
   }
   sProcType *p = fetch_process(curThread->tid);
-  p->exit_status = status;
+  if(p) {
+    p->exit_status = status;
+  }
   thread_exit();
 }
 
  int sys_write(int fd, const void *buffer, unsigned size) {
-   int return_code;
   if(0 == fd) {
-    return_code = 0;
+    return 0;
   } else if(1 == fd) {
     putbuf(buffer, size);
-    return_code = size;
+    return size;
   } else if(fd > 1 && fd < 128){
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      return_code = ((int)file_write (pFile, buffer, size));
+      return ((int)file_write (pFile, buffer, size));
     } else {
-      return_code = -1; 
+      return -1;
     }
   } else {
-    return_code= -1;
+    return -1;
   }
-  return return_code;
 }
 
  pid_t sys_exec(const char *cmd_line) {
@@ -246,27 +253,17 @@ syscall_handler (struct intr_frame *f UNUSED)
 
 	 struct file* f = filesys_open (fn_cp);
 
-	 if(f==NULL)
-	 {
+	 if(!f) {
 	  	return -1;
-	 }
-	 else
-	 {
+	 } else {
 	  	file_close(f);
-	  	// lock_acquire (&filesys_lock);
-	  	
-	  	tid_t tid = process_execute(cmd_line);//make this function return a thread structure
-	  	//add this thread structure as a list element
-	  	// lock_release (&filesys_lock);
-
-	  	return (pid_t) tid;
+	  	return ((pid_t) process_execute(cmd_line));
 	  }
 }
 
 
  int sys_wait(pid_t pid) {
-  int rc = process_wait(pid);
-  return rc;
+  return process_wait(pid);
 }
 /*
   Creates a new file called file initially initial size bytes in size.
@@ -275,16 +272,11 @@ syscall_handler (struct intr_frame *f UNUSED)
   require a open system call.
 */
  bool sys_create(const char *file, unsigned initial_size) {
-   
-  bool return_code;   
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
-    return_code = false;
+    return false;
   } else {
-    // lock_acquire (&filesys_lock);
-    return_code = filesys_create(file, initial_size);
-    // lock_release (&filesys_lock);
+    return filesys_create(file, initial_size);
   }
-  return return_code;
 }
 /*
   Deletes the file called file. Returns true if successful, false otherwise. A file may be
@@ -292,32 +284,24 @@ syscall_handler (struct intr_frame *f UNUSED)
   not close it.
 */
  bool sys_remove(const char *file) {
-  bool return_code;   
   if(strlen(file) > NAME_MAX || strlen(file) == 0) {
-    return_code = false;
+    return false;
   } else {
-    // lock_acquire (&filesys_lock);
-    return_code = filesys_remove(file);
-    // lock_release (&filesys_lock);
+    return filesys_remove(file);
   }
-  return return_code;
 }
 
  int sys_open(const char *file) {
-  int return_code;
   if (strlen(file) > NAME_MAX || strlen(file) == 0) {
-    return_code = -1;
+    return -1;
   } else {
-    // lock_acquire (&filesys_lock);
     struct file *pFile = filesys_open(file);
-    // lock_release (&filesys_lock);
     if(pFile) {
-      return_code = add_fdt_entry(pFile);
+      return add_fdt_entry(pFile);
     } else {
-      return_code = -1; 
+      return -1; 
     }
   }
-  return return_code;
 }
 
  int sys_filesize(int fd) {
@@ -328,32 +312,30 @@ syscall_handler (struct intr_frame *f UNUSED)
     } else {
       return -1; 
     }
+  } else {
+    return -1;
   }
 }
 
  int sys_read(int fd, void *buffer, unsigned size) {
-   int return_code;
   if(1 == fd) {
-    return_code = 0;
+    return 0;
   } else if(0 == fd) {
     char *buffer_ch = (char *) buffer;
-    for(int i = 0; i < size; i++) {
+    for(unsigned i = 0; i < size; i++) {
       buffer_ch[i] = input_getc();
     }
-    return_code = size;
+    return size;
   } else if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      // lock_acquire (&filesys_lock);
-      return_code= ((int)file_read (pFile, buffer, size));
-      // lock_release (&filesys_lock);
+      return ((int)file_read (pFile, buffer, size));
     } else {
-      return_code = -1; 
+      return -1; 
     }
   } else {
-    return_code = -1;
+    return -1;
   }
-  return return_code;
 }
 
 void sys_seek (int fd, unsigned position)
@@ -361,9 +343,7 @@ void sys_seek (int fd, unsigned position)
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      // lock_acquire (&filesys_lock);
       file_seek(pFile, position);
-      // lock_release (&filesys_lock);
     }
   }
 }
@@ -371,16 +351,16 @@ void sys_seek (int fd, unsigned position)
 
 unsigned sys_tell (int fd)
 { 
-  unsigned ret;
   if(fd > 1 && fd < 128) {
     struct file *pFile = thread_current()->fdh.fdt[fd].pFile;
     if(pFile) {
-      // lock_acquire (&filesys_lock);
-      ret= file_tell(pFile);
-      // lock_release (&filesys_lock);
+      return ((unsigned) file_tell(pFile));
+    } else {
+      return 0;
     }
+  } else {
+    return 0;
   }
-  return ret;
 }
 
  void sys_close(int fd) {
